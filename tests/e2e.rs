@@ -1,6 +1,6 @@
 use std::error::Error;
 use tokio;
-use tokio::time::{sleep, Duration};
+use web_terminal::run_server;
 
 #[test]
 fn simple_e2e_test() -> Result<(), Box<dyn Error>> {
@@ -11,30 +11,10 @@ fn simple_e2e_test() -> Result<(), Box<dyn Error>> {
 }
 
 async fn e2e_test() -> Result<(), String> {
-    let (server_stop_tx, stop_server_rx) = tokio::sync::oneshot::channel::<()>();
+    let (server_stop_tx, server_stop_rx) = tokio::sync::oneshot::channel::<()>();
     let (server_msg_tx, mut server_msg_rx) = tokio::sync::mpsc::channel(1);
 
-    let server = tokio::spawn( async move {
-        let timeout = sleep(Duration::from_millis(750));
-        tokio::pin!(timeout);
-        tokio::select! {
-            _ = &mut timeout => { }
-            result = stop_server_rx => {
-                match result {
-                    Ok(_)  => {
-                        println!("server received stop signal");
-                        return Ok(())
-                    }
-                    Err(e) => return Err(format!("failed to recv from server stop channel: {}", e))
-                }
-            }
-        }
-        match server_msg_tx.send("done".to_string()).await {
-            Ok(_)  => println!("server sent message \"done\""),
-            Err(e) => return Err(format!("failed to send server message: {}", e))
-        }
-        Ok(())
-    });
+    let server = tokio::spawn(run_server(server_stop_rx, server_msg_tx));
 
     let mut server_done = false;
     let sleep = tokio::time::sleep(tokio::time::Duration::from_millis(500));
