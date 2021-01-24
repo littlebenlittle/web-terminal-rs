@@ -1,5 +1,7 @@
 use std::error::Error;
 use tokio;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use web_terminal::run_server;
 
 #[test]
@@ -11,8 +13,8 @@ fn simple_e2e_test() -> Result<(), Box<dyn Error>> {
 }
 
 async fn e2e_test() -> Result<(), String> {
-    let (server_stop_tx, server_stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let (server_msg_tx, mut server_msg_rx) = tokio::sync::mpsc::channel(1);
+    let (server_stop_tx, server_stop_rx) = oneshot::channel::<()>();
+    let (server_msg_tx, mut server_msg_rx) = mpsc::channel(1);
 
     let server = tokio::spawn(run_server(server_stop_rx, server_msg_tx));
 
@@ -33,19 +35,32 @@ async fn e2e_test() -> Result<(), String> {
         }
     }
 
-    if !server_stop_tx.is_closed() {
-        if let Err(_) = server_stop_tx.send(()) {
-            return Err(format!("failed to send server stop signal"))
+    ensure_task_stopped("server", server, server_stop_tx).await?;
+    
+    Ok(())
+}
+
+async fn ensure_task_stopped<T,E>(
+    task_name: &str,
+    task_jh: std::pin::Pin<&mut JoinHandle<Result<T,E>>>,
+    stop_tx: oneshot::Sender<()>,
+)
+-> Result<(), String>
+where
+    E: std::fmt::Display + Error
+{
+    if !stop_tx.is_closed() {
+        if let Err(_) = stop_tx.send(()) {
+            return Err(format!("failed to send {} stop signal", task_name))
         } else {
-            match server.await {
+            match task_jh.await {
                 Ok(v) => match v {
-                    Ok(_)  => println!("server exited OK"),
-                    Err(e) => println!("server exited Err: {}", e)
+                    Ok(_)  => println!("{} exited OK", task_name),
+                    Err(e) => println!("{} exited Err: {}", task_name, e)
                 }
-                Err(e) => return Err(format!("failed to join with server task: {}", e))
+                Err(e) => return Err(format!("failed to join with {} task: {}", task_name, e))
             }
         }
     }
-    
     Ok(())
 }
