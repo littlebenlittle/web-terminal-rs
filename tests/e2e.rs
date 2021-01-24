@@ -26,6 +26,28 @@ fn e2e_test_no_timeout() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[test]
+fn test_websocket_connect() -> Result<(), Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Runtime::new()?;
+    let (client_connected, server_connected) = rt.block_on(websocket_connect_harness(
+        Duration::from_millis(1000),
+    ))?;
+    assert!(client_connected, "connection should have been established");
+    assert!(server_connected, "connection should have been established");
+    Ok(())
+}
+
+#[test]
+fn test_websocket_connect_failed() -> Result<(), Box<dyn std::error::Error>> {
+    let rt = tokio::runtime::Runtime::new()?;
+    let (client_connected, server_connected) = rt.block_on(websocket_connect_harness(
+        Duration::from_millis(1000),
+    ))?;
+    assert!(!client_connected, "connection should not have been established");
+    assert!(!server_connected, "connection should not have been established");
+    Ok(())
+}
+
 /// Ok(true) if test times out, Ok(false) if not
 async fn timeout_harness(
     pause_duration:   Duration,  // time before task sends message
@@ -92,8 +114,7 @@ async fn timeout_test_task(
     stop_rx: oneshot::Receiver<()>,
     msg_tx:  mpsc::Sender<String>,
     pause_duration: Duration,
-)
--> Result<(), Error>
+) -> Result<(), Error>
 {
     let timeout = sleep(pause_duration);
     tokio::pin!(timeout);
@@ -116,4 +137,77 @@ pub enum Error {
     TokioMpscSendString(#[from] mpsc::error::SendError<std::string::String>),
     #[error("tokio oneshot recv error")]
     TokioOneshotRecv(#[from] tokio::sync::oneshot::error::RecvError),
+}
+
+async fn websocket_connect_harness(
+    timeout_duration: Duration,  // time before test times out
+) -> Result<(bool, bool), String> {
+    let (client_stop_tx, client_stop_rx) = oneshot::channel::<()>();
+    let (client_connect_tx, mut client_connect_rx) = mpsc::channel::<String>(1);
+    let (client_msg_tx, mut client_msg_rx) = mpsc::channel(1);
+    let client = tokio::spawn(run_websocket_client(
+        client_stop_rx,
+        client_connect_tx,
+        client_msg_tx,
+    ));
+
+    let (server_stop_tx, server_stop_rx) = oneshot::channel::<()>();
+    let (server_connect_tx, mut server_connect_rx) = mpsc::channel::<String>(1);
+    let (server_msg_tx, mut server_msg_rx) = mpsc::channel(1);
+    let server = tokio::spawn(run_websocket_server(
+        server_stop_rx,
+        server_connect_tx,
+        server_msg_tx,
+    ));
+
+    let (mut client_done, mut server_done) = (false, false);
+    let (mut client_connected, mut server_connected) = (false, false);
+    let sleep = tokio::time::sleep(timeout_duration);
+    tokio::pin!(sleep);
+    tokio::pin!(client);
+    tokio::pin!(server);
+    while !(client_done && server_done) {
+        tokio::select! {
+            _ = &mut sleep => {
+                panic!("test timed out");
+            }
+            Some(addr) = client_connect_rx.recv() => {
+                println!("client connected: {}", addr);
+                client_connected = true;
+            }
+            Some(addr) = server_connect_rx.recv() => {
+                println!("server connected: {}", addr);
+                server_connected = true;
+            }
+            Some(msg) = client_msg_rx.recv() => {
+                println!("client received: {}", msg);
+                client_done = true;
+            }
+            Some(msg) = server_msg_rx.recv() => {
+                println!("server received: {}", msg);
+                server_done = true;
+            }
+        }
+    }
+
+    ensure_task_stopped("client", client, client_stop_tx).await?;
+    ensure_task_stopped("server", server, server_stop_tx).await?;
+    
+    Ok((client_connected, server_connected))
+}
+
+async fn run_websocket_client(
+    stop_rx: oneshot::Receiver<()>,
+    connect_tx: mpsc::Sender<String>,
+    msg_tx: mpsc::Sender<String>,
+) -> Result<(), Error> {
+    Ok(())
+}
+
+async fn run_websocket_server(
+    stop_rx: oneshot::Receiver<()>,
+    connect_tx: mpsc::Sender<String>,
+    msg_tx: mpsc::Sender<String>,
+) -> Result<(), Error> {
+    Ok(())
 }
