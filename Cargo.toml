@@ -5,7 +5,11 @@ authors = ["Ben Little <ben.little@benlittle.dev>"]
 edition = "2018"
 
 [dependencies]
-tokio = { version="1.1.0", features=["full"] }
+tokio = { version="1.0.0", features=["full"] }
 async-tungstenite = { version="0.12.0", features=["tokio-runtime"] }
 thiserror = "1.0.23"
 futures = "0.3.12"
+log = "0.4"
+tokio-tungstenite = "0.12.0"
+futures-util = { version = "0.3", default-features = false, features = ["async-await", "sink", "std"] }
+url = "2.2.0"
